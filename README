@@ -1,0 +1,101 @@
+***************************************
+                ktriac
+            the power what you neeeeed
+***************************************
+
+
+0, PRE-INSTALLATION:
+Edit ktriac.c, and modify the GPIO-pins for your needs:
+    GPIO_ACFREQ - the zerocross circuit GPIO pin
+    GPIO_TRIAC - the output circuit pin that turns the TRIAC on
+    AC_DEFAULT_FREQ - AC frequency default is 50Hz
+
+1, INSTALLATION:
+you need linux-headers & build-essentials
+then:
+make
+sudo insmode ktriac.ko
+
+2, Once module loaded:
+You can handle with it on sysfs, read and write the /sys/ktriac/ktriac file.
+    
+    POWER SETTINGS:
+            1,  You can operate in percent mode, that means the X% of the current in a half phase will be turned on.
+                Only for sinus waves! For other waweforms you should change the percent_to_angle_table in the source file.
+               
+                echo 10% > /sys/ktriac/ktriac
+                    -> turns the triac with 10% of the current on
+            
+            2,  You can control the TRIAC specifying the attack angle in deg. Sysfs interface accepts -1-180 degree, where -1 & 180 turns off, 0 is the full power.
+            
+                echo 90d > /sys/ktriac/ktriac
+                    -> sets the triac attack angle to 90 deg, witch corresponds to the 50% of the power.
+                    
+            3, To operate in PWM mode you need to set the mark:space relation. For mark * half phase tunrs on the TRIAC and space * half phase turns off. 
+                
+                echo 1:3 > /sys/ktriac/ktriac
+                    -> 10ms on, after it 30 ms off.
+                    
+    ADJUSTMENTS:
+            1,  Set up / change the frequency:
+                
+                echo 50Hz > /sys/ktriac/ktriac
+            
+            2,  Change the TRIAC trigger time ( TRIAC fire time):
+                To be sure that the TRIAC gets on, you can specify the time in microsecounds to trigger the TRIAC. (Danger, high values can cause malfunction triggering and getting the triac on in the next half phase)
+                
+                echo 100us > /sys/ktriac/ktriac
+            
+            3,  Change the zerocross latency time:
+                Very helpful if your detection circuit have a lot of resistance and it detects the zerocross event before/after it really happens.
+                
+                echo 600kus > /sys/ktriac/ktriac
+                        -> sets the latency by 600 microsecounds.
+                        
+            4,  Tolerance:
+                Use it if the input circuit noisy is. A little tolerance is necessary becouse Linux don't will dispatch every IRQ to real-time, therefore it is impossible get input triggering accurate every 10ms. The tolernce in percent accept the input circuit trigger if it comes in the tolerance range. For example at 50Hz 1% of tolerance means: every zerocross triggering witch comes beetween 9900us < last_trigger < 11000ms.
+                
+                echo7t  > /sys/ktriac/ktriac
+                        -> sets the toleranct to 7%
+                        
+                        
+
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
