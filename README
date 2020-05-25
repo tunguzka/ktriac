@@ -55,7 +55,7 @@ You can handle with it on sysfs, read and write the /sys/ktriac/ktriac file.
             4,  Tolerance:
                 Use it if the input circuit noisy is. A little tolerance is necessary becouse Linux don't will dispatch every IRQ to real-time, therefore it is impossible get input triggering accurate every 10ms. The tolernce in percent accept the input circuit trigger if it comes in the tolerance range. For example at 50Hz 1% of tolerance means: every zerocross triggering witch comes beetween 9900us < last_trigger < 11000ms.
                 
-                echo7t  > /sys/ktriac/ktriac
+                echo 7t  > /sys/ktriac/ktriac
                         -> sets the toleranct to 7%
                         
                         
