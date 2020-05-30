@@ -1,1 +1,24 @@
+**********************
+Ramp utility to deal with ktriac kernel module sysfs interfce
+**********************
+
+Compile:
+make
+
+Usage:
+The ramp utility helps you to turn on/off the triac gradully, you can specify ramps according your needs.
+
+The general form to specify a ramp:
+./ramp [from%]-[to%]-[step%]-[time in ms]
+
+in [time] will change the triac power [from%] to [to%] increasing/decreasing with [step%]
+
+Example:
+./ramp 0%-60%-5%-1000 > /sys/ktriac/ktriac
+this command turns on in 1000m (1 sec) the triac starting from 0% increasinc the power with 5% in every step until reaching 60%.
+
+You can specify many ramps in a command:
+./ramp 0%-60%-5%-2000 60%-100%-1%-1000 100%-0%-1%-500
+
+Will trun on in two steps 0% -> 60% in 2000ms and from 60% -> 100% in 1000 ms after this turn off gradually in 500 ms.
 
