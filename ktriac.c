@@ -19,36 +19,12 @@
 #include <linux/uaccess.h>
 #include <linux/wait.h>
 #include <linux/hrtimer.h>
-
-
-//GPIO pin of the zerocrossing detection circuit -> low input = zerocrossing
-#define GPIO_ACFREQ                     9
-
-//GPIO pin of output circuit, turns TRIAC on
-#define GPIO_TRIAC                      10
-
-//100us fire time to be sure that te triac gets on
-#define TRIAC_DEFAULT_FIRE_TIME                 100 * 1000
-
-//50Hz the default AC_FREQ -> will be set at loading the module
-#define AC_DEFULT_FREQ                  50
-
-/***
- * Zerocross detection tolerance, helpful is the detection circuit noisy is.
- * Not recommendable set to 0
- * Defines the upper and lower time limit of the range in it the input interrupt will be accepted
- * Example: 1% tolerance on 50Hz
- * Irq will accepted and interpreted as zerocrossing event if it comes between 9900-10100us after the last one.
-***/
-#define AC_DEFULT_TOLERANCE             3
-
-
-//Enable /dev/ktriac to debug zerocrossing signals
-#define DEBUG_DEVICE                    1
+#include "ktriac.h"
 
 #ifdef DEBUG_DEVICE
     #define UPDATED_TIME 1
     #define UPDATED_DUTY 2
+    #define UPDATED_NOT_HANDLED_TIME 3
 
     static wait_queue_head_t waitqueue;
     static int updated;
@@ -76,9 +52,9 @@ static unsigned int duty;
 //AC freq tolerance in %: great if your zerocrossing circuit noisy is.
 static int tolerance;
 
-static ktime_t lastRising, lastFalling, triacTriggerDelay, triacFireTime;
-static s64 delta_us;
-static u64 zeroCrossLatency;
+static ktime_t lastRising, lastFalling, triacTriggerDelay, triacFireTime, nextFire;
+static s64 delta_us, delta;
+static s64 zeroCrossLatency, halfPhase;
 
 /* Define GPIOs & Irq */
 static struct gpio pins[] = {
@@ -116,12 +92,18 @@ inline unsigned int calc_freq(unsigned int us)
 static irqreturn_t zerocross_trigger_isr(int irq, void *data)
 {
         ktime_t now = ktime_get();
-        s64 delta = ktime_us_delta( now, lastRising);
+        delta = ktime_us_delta( now, lastRising);
         
         
         //don't handle events < 300us
         if ( delta < 300 || delta < freqTimeLowerBound)
+        {
+#ifdef DEBUG_DEVICE        
+            updated = UPDATED_NOT_HANDLED_TIME;        
+            wake_up(&waitqueue);
+#endif        
             return IRQ_HANDLED;
+        }
 
         if ( delta > freqTimeUpperBound)
         {
@@ -136,7 +118,13 @@ static irqreturn_t zerocross_trigger_isr(int irq, void *data)
         {
             ++counter;
             if ( counter <= mark)
-                hrtimer_start(&hr_timer, ktime_add_us( now, zeroCrossLatency), HRTIMER_MODE_ABS);
+            {
+                nextFire = ktime_add_us( now, zeroCrossLatency);
+                
+                if ( !hrtimer_active( &hr_timer))                    
+                    hrtimer_start(&hr_timer, nextFire, HRTIMER_MODE_ABS);
+            }
+            
             if ( counter >= space + mark)
                 counter = 0;
             
@@ -144,7 +132,11 @@ static irqreturn_t zerocross_trigger_isr(int irq, void *data)
         else
         if ( triacAngle > 0)
         {
-            hrtimer_start(&hr_timer, ktime_add_us( ktime_add( now, triacTriggerDelay), zeroCrossLatency), HRTIMER_MODE_ABS);
+            nextFire = ktime_add_us( ktime_add( now, triacTriggerDelay), zeroCrossLatency);
+//            printk(KERN_INFO "ktriac: timer to: %lld s\n", nextFire);
+            
+            if ( !hrtimer_active( &hr_timer))                
+                hrtimer_start(&hr_timer, nextFire, HRTIMER_MODE_ABS);
         }
         else
         if ( triacAngle < 0 && is_triac_on())
@@ -161,22 +153,35 @@ static irqreturn_t zerocross_trigger_isr(int irq, void *data)
         updated = UPDATED_TIME;        
         wake_up(&waitqueue);
 #endif
-        
-        
+                
         return IRQ_HANDLED;
 }
 
 static enum hrtimer_restart triac_fire( struct hrtimer *timer)
 {
+    ktime_t now =  ktime_get();
+    
+    
     if ( !is_triac_on())
     {
+//        printk(KERN_INFO "\t\t triac ON: %lld\t\tlatency: %lldus\n", now, ktime_us_delta( now, timer->_softexpires));
+        
         hrtimer_forward( timer, timer->_softexpires, triacFireTime);
         triac( ON);
         
         return HRTIMER_RESTART;
     }
     
+    //now = ktime_get();
     triac( OFF);
+//    printk(KERN_INFO "\t\t triac OFF: %lld\n", now);
+    
+    if ( ktime_after( nextFire, now))
+    {
+        hrtimer_forward( timer, now, ktime_sub( nextFire, now));
+//        printk(KERN_INFO "\t\t resheduling timer: %lld\n", nextFire);
+        return HRTIMER_RESTART;
+    }
 
     return HRTIMER_NORESTART;
 }
@@ -244,7 +249,17 @@ static void set_ac_frequent( int freq)
     
     freqTimeLowerBound = ( duration * ( 100 - tolerance)) / 100;
     freqTimeUpperBound = ( duration * ( 100 + tolerance)) / 100;
+    
+    halfPhase = duration;    
     printk(KERN_INFO "ktriac: setting ac_freq: %d Hz freqTimeLowerBound: %d us freqTimeUpperBound: %d s\n", ac_freq,freqTimeLowerBound, freqTimeUpperBound);
+}
+
+static void set_zerocross_latency( int value)
+{
+    if ( value < 0)
+        zeroCrossLatency = halfPhase + value;
+    else
+        zeroCrossLatency = value;
 }
 
 // SYSFS
@@ -317,7 +332,7 @@ static ssize_t triac_store(struct kobject *kobj, struct kobj_attribute *attr,
             //set latency time
             if ( strcmp( &buffer[0], "kus") == 0)
             {
-                zeroCrossLatency = value;
+                set_zerocross_latency( value);
             } else
             //set frequent
             if ( strcmp( &buffer[0], "Hz") == 0 || strcmp( &buffer[0], "hz") == 0)
@@ -344,12 +359,12 @@ static struct kobj_attribute ktriac_kobject_attribute =__ATTR(ktriac, 0664, tria
 static struct kobject *ktriac_kobject;
 
 static void triac_sysfs_init(void){
-    printk(KERN_INFO "ktriac: starting sysfs...\n");
+//    printk(KERN_INFO "ktriac: starting sysfs...\n");
     
     ktriac_kobject = kobject_create_and_add("ktriac", NULL);
     
     if (sysfs_create_file(ktriac_kobject, &ktriac_kobject_attribute.attr)) {
-        pr_debug("failed to create triac sysfs!\n");
+        pr_debug("ktirac: failed to create triac sysfs!\n");
   }
 }
 
@@ -393,16 +408,21 @@ static ssize_t dev_read(struct file *file, char __user *buf,
             case UPDATED_DUTY:
                 len = sprintf(tmp, "#duty changed: %d%%\n", duty);
                 break;
+            
+            case UPDATED_NOT_HANDLED_TIME:
+                len = sprintf(tmp, "\t\t\t%lld\n", delta);
+                break;
+                
             default:
                 len = sprintf(tmp, "#default  updated:%d\n", updated);
                 break;
         }
 
+        updated = 0;
+
         if (copy_to_user(buf, tmp, len)) {
             return -EFAULT;
         }
-        
-        updated = 0;
         return len;
 }
 
@@ -441,16 +461,17 @@ static struct miscdevice dev_misc_device = {
 static int __init ktriac_init(void)
 {
         int ret = 0;
-        printk(KERN_INFO "%s\n", __func__);
+//        printk(KERN_INFO "%s\n", __func__);
 
         //init ac freq variables
-        tolerance = AC_DEFULT_TOLERANCE;
-        set_ac_frequent( AC_DEFULT_FREQ);
+        tolerance = AC_DEFAULT_TOLERANCE;
+        set_ac_frequent( AC_DEFAULT_FREQ);
+        set_zerocross_latency( ZEROCROSS_DEFAULT_LATENCY);
         triacAngle = -1;
         delta_us = 0;
         counter = mark = space = 0;
-        zeroCrossLatency = 800;
         duty = 0;
+        
 #ifdef DEBUG_DEVICE        
         updated = 0;
 #endif
@@ -514,7 +535,7 @@ fail2:
  */
 static void __exit ktriac_exit(void)
 {
-        printk(KERN_INFO "%s\n", __func__);
+//        printk(KERN_INFO "%s\n", __func__);
 
         triac( OFF);
         
@@ -533,7 +554,7 @@ static void __exit ktriac_exit(void)
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("The TunguZka Team Hungary");
-MODULE_DESCRIPTION("Linux Kernel Module for control TRIACs on AC circuits");
+MODULE_DESCRIPTION("Linux Kernel Module for control TRIACs and so AC circuits");
 
 module_init(ktriac_init);
 module_exit(ktriac_exit);
