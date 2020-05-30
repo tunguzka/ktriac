@@ -1,12 +1,12 @@
 ***************************************
                 ktriac
-            the power what you neeeeed
+            the power what you need
 ***************************************
 
 
 0, PRE-INSTALLATION:
-Edit ktriac.c, and modify the GPIO-pins for your needs:
-    GPIO_ACFREQ - the zerocross circuit GPIO pin
+Edit ktriac.h, and modify the GPIO-pins for your needs:
+    GPIO_ACFREQ - the zerocross detection circuit GPIO pin
     GPIO_TRIAC - the output circuit pin that turns the TRIAC on
     AC_DEFAULT_FREQ - AC frequency default is 50Hz
 
@@ -14,10 +14,10 @@ Edit ktriac.c, and modify the GPIO-pins for your needs:
 you need linux-headers & build-essentials
 then:
 make
-sudo insmode ktriac.ko
+sudo insmod ktriac.ko
 
 2, Once module loaded:
-You can handle with it on sysfs, read and write the /sys/ktriac/ktriac file.
+You can deal with it on sysfs, read and write the /sys/ktriac/ktriac file.
     
     POWER SETTINGS:
             1,  You can operate in percent mode, that means the X% of the current in a half phase will be turned on.
@@ -53,7 +53,7 @@ You can handle with it on sysfs, read and write the /sys/ktriac/ktriac file.
                         -> sets the latency by 600 microsecounds.
                         
             4,  Tolerance:
-                Use it if the input circuit noisy is. A little tolerance is necessary becouse Linux don't will dispatch every IRQ to real-time, therefore it is impossible get input triggering accurate every 10ms. The tolernce in percent accept the input circuit trigger if it comes in the tolerance range. For example at 50Hz 1% of tolerance means: every zerocross triggering witch comes beetween 9900us < last_trigger < 11000ms.
+                Use it if the input circuit noisy is. A little tolerance is necessary because Linux don't will dispatch every IRQ in real-time, therefore it is impossible to get input trigger accurate every 10ms. The tolernce in percent accept the input circuit trigger if it comes in the tolerance range. For example at 50Hz 1% of tolerance means: every zerocross triggering is accepted witch comes beetween 9900us < last_trigger < 11000ms.
                 
                 echo 7t  > /sys/ktriac/ktriac
                         -> sets the toleranct to 7%
